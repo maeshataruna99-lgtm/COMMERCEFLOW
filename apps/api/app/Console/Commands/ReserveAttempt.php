@@ -42,6 +42,9 @@ class ReserveAttempt extends Command
 
             $user = $this->resolveUser($this->argument('userId'));
 
+            // A failed attempt leaves an orphan CREATED order behind. That is
+            // acceptable for this concurrency harness; production checkout
+            // decides create-vs-abort semantics per order.
             $order = Order::create([
                 'user_id' => $user->id,
                 'order_number' => 'RES-'.Str::uuid()->toString(),

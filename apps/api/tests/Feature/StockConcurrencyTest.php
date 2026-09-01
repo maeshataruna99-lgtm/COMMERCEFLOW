@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Enums\InventoryMovementType;
 use App\Enums\ReservationState;
 use App\Exceptions\InsufficientStockException;
 use App\Models\Inventory;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\StockReservation;
 use App\Models\User;
 use App\Services\StockReservationService;
 use Illuminate\Contracts\Console\Kernel;
@@ -31,10 +33,14 @@ class StockConcurrencyTest extends TestCase
     private const MAX_PG_CONNECTIONS = 100;
 
     /**
-     * Peak worker concurrency per batch. Ceiling math: 25 workers + 1 harness
-     * connection = 26 << 100.
+     * Peak worker concurrency per batch. Set so a genuinely contended wave
+     * occurs: SEED_STOCK=50 with 90 workers in the first batch means many
+     * workers race for the last available units, exercising the oversell-proof
+     * path that a 25-worker batch (demand never exceeding supply) would miss.
+     * Ceiling math: 90 workers + 1 harness connection = 91 < 100, so a
+     * connection exhaustion can never masquerade as an availability conflict.
      */
-    private const WORKER_CONCURRENCY = 25;
+    private const WORKER_CONCURRENCY = 90;
 
     private const TOTAL_ATTEMPTS = 100;
 
@@ -143,6 +149,69 @@ class StockConcurrencyTest extends TestCase
         $this->assertSame(0, (int) $row->reserved_stock);
     }
 
+    public function test_releasing_the_same_reservation_twice_decrements_reserved_once(): void
+    {
+        [$user, $product, $inventory] = $this->seedCommittedStock(5);
+
+        $order = Order::create([
+            'user_id' => $user->id,
+            'order_number' => 'ORD-'.Str::uuid()->toString(),
+            'status' => 'CREATED',
+            'total_cents' => 0,
+        ]);
+
+        $service = app(StockReservationService::class);
+        $reservation = $service->reserve($inventory, 1, $order, now()->addMinutes(10));
+
+        // Two FRESH instances of the SAME row, both observing state=ACTIVE,
+        // simulate two concurrent callers that both passed a stale pre-check
+        // before either acquired the inventory lock.
+        $staleA = StockReservation::find($reservation->id);
+        $staleB = StockReservation::find($reservation->id);
+        $this->assertNotNull($staleA);
+        $this->assertNotNull($staleB);
+
+        $service->releaseReservation($staleA);
+        $service->releaseReservation($staleB); // must be a no-op
+
+        $row = DB::table('inventories')->where('id', $inventory->id)->first();
+        $this->assertSame(5, (int) $row->physical_stock, 'physical_stock must stay at seed (release is reserved-only).');
+        $this->assertSame(0, (int) $row->reserved_stock, 'reserved_stock must be decremented exactly once (5 -> 0), not twice (-1).');
+        $this->assertSame(
+            1,
+            DB::table('stock_movements')
+                ->where('inventory_id', $inventory->id)
+                ->where('type', InventoryMovementType::RELEASE->value)
+                ->count(),
+            'Exactly one RELEASE movement: the first release, not a second one from the stale caller.',
+        );
+    }
+
+    public function test_a_wave_where_available_is_less_than_concurrent_demand_still_never_oversells(): void
+    {
+        [$user, $product, $inventory] = $this->seedCommittedStock(5);
+
+        // 10 concurrent workers each want 1 unit, but only 5 are available:
+        // a genuinely contended wave where demand (10) exceeds supply (5).
+        $exitCodes = $this->runReserveAttempts($product->id, 1, $user->id, total: 10, concurrency: 10);
+
+        $successes = count(array_filter($exitCodes, static fn (int $code): bool => $code === 0));
+        $conflicts = count(array_filter($exitCodes, static fn (int $code): bool => $code === 2));
+
+        $this->assertSame(5, $successes, 'Exactly 5 of the 10 contended attempts must succeed.');
+        $this->assertSame(5, $conflicts, 'The other 5 contended attempts must be availability conflicts.');
+        $this->assertCount(10, $exitCodes, 'Every worker must return a distinct exit code.');
+
+        $row = DB::table('inventories')->where('id', $inventory->id)->first();
+        $this->assertSame(5, (int) $row->physical_stock);
+        $this->assertSame(5, (int) $row->reserved_stock, 'reserved must equal the 5 successful reservations.');
+        $this->assertLessThanOrEqual(
+            (int) $row->physical_stock,
+            (int) $row->reserved_stock,
+            'Oversold (reserved > physical) must never happen even under contention.',
+        );
+    }
+
     /**
      * @return array{0: User, 1: Product, 2: Inventory}
      */
@@ -174,10 +243,17 @@ class StockConcurrencyTest extends TestCase
 
     private function freshPdo(): PDO
     {
+        $config = config('database.connections.pgsql');
+
         return new PDO(
-            'pgsql:host=127.0.0.1;port=5432;dbname=commerceflow_test',
-            'commerceflow',
-            'commerceflow',
+            sprintf(
+                'pgsql:host=%s;port=%s;dbname=%s',
+                $config['host'],
+                $config['port'],
+                $config['database'],
+            ),
+            $config['username'],
+            $config['password'],
         );
     }
 
@@ -200,16 +276,18 @@ class StockConcurrencyTest extends TestCase
             'Workers + harness connection must stay under PostgreSQL max_connections.',
         );
 
+        $pgsql = config('database.connections.pgsql');
+
         $env = [
             'APP_ENV' => 'testing',
             'APP_KEY' => config('app.key'),
             'BCRYPT_ROUNDS' => '4',
             'DB_CONNECTION' => 'pgsql',
-            'DB_HOST' => '127.0.0.1',
-            'DB_PORT' => '5432',
-            'DB_DATABASE' => 'commerceflow_test',
-            'DB_USERNAME' => 'commerceflow',
-            'DB_PASSWORD' => 'commerceflow',
+            'DB_HOST' => $pgsql['host'],
+            'DB_PORT' => (string) $pgsql['port'],
+            'DB_DATABASE' => $pgsql['database'],
+            'DB_USERNAME' => $pgsql['username'],
+            'DB_PASSWORD' => $pgsql['password'],
         ];
 
         $baseArgs = [PHP_BINARY, 'artisan', 'reserve:attempt', (string) $productId, (string) $qty];
