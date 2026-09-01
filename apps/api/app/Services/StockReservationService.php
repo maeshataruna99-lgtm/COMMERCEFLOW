@@ -102,6 +102,15 @@ final class StockReservationService
 
         $this->retryOnSerialization(function () use ($reservation) {
             DB::transaction(function () use ($reservation) {
+                // Lock ordering is inventory-before-reservation (same as
+                // transitionActiveReservations / spec §6.4 / F2.5): the inventory
+                // row is locked first, then the reservation row, eliminating the
+                // AB-BA deadlock window between the two paths.
+                $locked = Inventory::query()
+                    ->whereKey($reservation->inventory_id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
                 /** @var StockReservation|null $lockedReservation */
                 $lockedReservation = StockReservation::query()
                     ->whereKey($reservation->getKey())
@@ -112,11 +121,6 @@ final class StockReservationService
                 if ($lockedReservation === null) {
                     return; // already released/consumed/expired: no-op
                 }
-
-                $locked = Inventory::query()
-                    ->whereKey($lockedReservation->inventory_id)
-                    ->lockForUpdate()
-                    ->firstOrFail();
 
                 $delta = MovementLedger::apply($locked, InventoryMovementType::RELEASE, (int) $lockedReservation->quantity);
 
@@ -147,8 +151,9 @@ final class StockReservationService
      *
      * Lock ordering is inventory-before-reservation (spec §6.4 / F2.5): the
      * inventory rows are locked first in ascending id, then the reservation
-     * rows. releaseReservation() uses the same order, eliminating the AB-BA
-     * deadlock window between the two paths.
+     * rows. releaseReservation() follows the same order (inventory, then the
+     * single reservation row), eliminating the AB-BA deadlock window between
+     * the two paths.
      */
     private function transitionActiveReservations(
         Order $order,
