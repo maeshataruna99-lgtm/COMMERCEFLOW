@@ -46,7 +46,18 @@ final class ReservationExpiryService
     {
         try {
             DB::transaction(function () use ($orderId) {
-                $order = Order::query()->find($orderId);
+                // Lock the order row FIRST so the status read below is
+                // authoritative, closing the TOCTOU window where a concurrent
+                // payment webhook could commit PAID after we snapshot RESERVED
+                // and then have EXPIRED written over it. Lock ordering is order
+                // row -> (via expire) inventory rows ascending -> reservation
+                // rows — the same global order as the payment webhook path, so
+                // no AB-BA deadlock is introduced.
+                /** @var Order|null $order */
+                $order = Order::query()
+                    ->whereKey($orderId)
+                    ->lockForUpdate()
+                    ->first();
 
                 if ($order === null) {
                     return;
@@ -58,15 +69,14 @@ final class ReservationExpiryService
                 // once per reservation; physical_stock is left unchanged.
                 $this->stockReservationService->expire($order);
 
-                // Transition the order RESERVED -> EXPIRED exactly once. Skip
-                // terminal states (EXPIRED/PAID/CANCELLED) that a concurrent
-                // flow may have moved this order into — but the reservations
-                // above are still expired regardless.
-                if (in_array($order->status, [
-                    OrderStatus::EXPIRED,
-                    OrderStatus::PAID,
-                    OrderStatus::CANCELLED,
-                ], true)) {
+                // Transition the order RESERVED -> EXPIRED exactly once.
+                // RESERVED -> EXPIRED is the only legal transition here; any
+                // other status (PAID/CANCELLED committed by a concurrent flow,
+                // or CREATED) must be skipped — the reservations above are still
+                // expired regardless. Checking the locked status rather than a
+                // fixed skip-list also prevents an IllegalOrderTransitionException
+                // from aborting the whole order transaction.
+                if ($order->status !== OrderStatus::RESERVED) {
                     return;
                 }
 

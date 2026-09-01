@@ -140,6 +140,70 @@ class ReservationExpiryTest extends TestCase
             $this->releaseMovementCount($inventoryGood->id),
             'The good order must still be expired despite the raced order in the batch.',
         );
+
+        // The raced (PAID) order must NOT be demoted back to EXPIRED, and its
+        // remaining ACTIVE reservations must still be expired.
+        $this->assertSame(
+            OrderStatus::PAID,
+            $racedOrder->fresh()->status,
+            'A concurrently-paid order must never be demoted to EXPIRED.',
+        );
+        $this->assertDatabaseHas('stock_reservations', [
+            'order_id' => $racedOrder->id,
+            'inventory_id' => $inventoryRaced->id,
+            'state' => ReservationState::EXPIRED->value,
+        ]);
+        $this->assertSame(0, (int) $inventoryRaced->fresh()->reserved_stock);
+        $this->assertSame(
+            10,
+            (int) $inventoryRaced->fresh()->physical_stock,
+            'Physical stock must be unchanged, restoring available to full.',
+        );
+    }
+
+    public function test_paid_order_that_races_with_expiry_is_not_demoted_and_reservations_expired(): void
+    {
+        $inventory = $this->makeInventory(10);
+        $order = $this->makeReservedOrder();
+        $this->reservationService->reserve($inventory, 7, $order, now()->subMinutes(5));
+
+        // Simulate the race: a payment webhook commits the order to PAID while
+        // its ACTIVE reservations are still past-due (the webhook consumed none
+        // of them in this scenario). The expiry job must lock the order, see
+        // PAID, expire the remaining ACTIVE reservations, and NOT write EXPIRED
+        // over the committed PAID status.
+        $order->update(['status' => OrderStatus::PAID->value]);
+
+        $this->expiry->expireAll();
+
+        $this->assertSame(
+            OrderStatus::PAID,
+            $order->fresh()->status,
+            'A paid order must not be demoted to EXPIRED by the expiry job.',
+        );
+
+        $this->assertDatabaseHas('stock_reservations', [
+            'order_id' => $order->id,
+            'inventory_id' => $inventory->id,
+            'state' => ReservationState::EXPIRED->value,
+        ]);
+
+        $row = $inventory->fresh();
+        $this->assertSame(
+            0,
+            (int) $row->reserved_stock,
+            'All ACTIVE reservations must still be expired regardless of the order status.',
+        );
+        $this->assertSame(
+            10,
+            (int) $row->physical_stock,
+            'Physical stock unchanged so available returns to full (10).',
+        );
+        $this->assertSame(
+            1,
+            $this->releaseMovementCount($inventory->id),
+            'Exactly one RELEASE movement must be written for the expired reservation.',
+        );
     }
 
     private function makeInventory(int $physical): Inventory
