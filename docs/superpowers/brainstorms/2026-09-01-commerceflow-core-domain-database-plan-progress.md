@@ -133,6 +133,18 @@
 **Rationale:** User confirmed all 13 findings are valid; fix them all and finalize the plan for sign-off without an additional review round.
 **Timestamp:** 2026-09-01 21:50
 
+### I2 [✓ decided]
+**Triggered in:** Task 1 execution (code quality review, Critical)
+**Related finding:** Laravel 11 EOL + 2 HIGH advisories (PKSA-mdq4-51ck-6kdq, PKSA-3r5d-mb8f-1qw9 CRLF-injection email rule; PKSA-m5cs-t1y6-qpcs signed-URL confusion); no 11.x fix; requires Laravel 12.60+.
+**Reason for intervention:** Laravel 11 is EOL (security support ended ~March 2026) with unpatched HIGH vulnerabilities; `policy.advisories.ignore-id` suppression flagged Critical by code quality review.
+**Options Presented:**
+- A: Upgrade to Laravel 12 (recommended; security-fixed, current)
+- B: Keep Laravel 11 + documented risk
+- C: Keep 11, defer upgrade decision
+**User Decision:** A — Upgrade to Laravel 12
+**Rationale:** User approved upgrading the stack to Laravel 12 (framework ^12) to avoid shipping an EOL framework with unpatched HIGH advisories. This deviates from the original "Laravel 11" requirement and will be recorded as an ADR. Task 1 is re-worked; remaining tasks run on Laravel 12.
+**Timestamp:** 2026-09-01 22:05
+
 ---
 
 ## Context Reference
