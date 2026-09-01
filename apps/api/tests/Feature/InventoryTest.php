@@ -163,9 +163,9 @@ class InventoryTest extends TestCase
         ]);
     }
 
-    public function test_order_can_be_created_before_carts_exist(): void
+    public function test_manual_order_can_be_created_without_a_cart(): void
     {
-        $this->assertFalse(Schema::hasColumn('orders', 'cart_id'));
+        $this->assertTrue(Schema::hasColumn('orders', 'cart_id'));
 
         $user = User::factory()->create();
 
@@ -174,12 +174,14 @@ class InventoryTest extends TestCase
             'order_number' => 'ORD-20260901-0001',
             'status' => OrderStatus::CREATED->value,
             'total_cents' => 0,
+            'cart_id' => null,
         ]);
 
         $this->assertModelExists($order);
         $this->assertSame(OrderStatus::CREATED, $order->status);
         $this->assertSame(0, $order->total_cents);
         $this->assertSame(0, $order->totalCents);
+        $this->assertNull($order->cart_id);
         $this->assertDatabaseHas('orders', [
             'id' => $order->id,
             'order_number' => 'ORD-20260901-0001',

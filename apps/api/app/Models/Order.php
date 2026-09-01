@@ -20,6 +20,7 @@ class Order extends Model
      */
     protected $fillable = [
         'user_id',
+        'cart_id',
         'order_number',
         'status',
         'total_cents',
@@ -48,6 +49,11 @@ class Order extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function cart(): BelongsTo
+    {
+        return $this->belongsTo(Cart::class);
     }
 
     public function orderItems(): HasMany

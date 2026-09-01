@@ -194,7 +194,11 @@ final class StockReservationService
 
                     $delta = MovementLedger::apply($locked, $movementType, (int) $reservation->quantity);
 
+                    // SALE also decrements physical (spec §6.4 consumption step
+                    // 7); RELEASE/EXPIRED leave physical unchanged. Persisting
+                    // both keeps the inventory row in lockstep with the ledger.
                     $locked->update([
+                        'physical_stock' => $delta['afterPhysical'],
                         'reserved_stock' => $delta['afterReserved'],
                     ]);
 
