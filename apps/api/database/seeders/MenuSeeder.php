@@ -10,7 +10,7 @@ class MenuSeeder extends Seeder
 {
     public function run(): void
     {
-        $permId = static fn (string $name): int => Permission::where('name', $name)->value('id');
+        $permId = static fn (string $name): int => Permission::where('name', $name)->firstOrFail()->id;
 
         $menu = function (array $item, ?int $parentId = null): Menu {
             return Menu::updateOrCreate(
