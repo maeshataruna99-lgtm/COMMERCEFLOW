@@ -62,10 +62,16 @@ final class PaymentWebhookService
                 ]);
 
                 if ($lockedOrder->status === OrderStatus::PAID) {
-                    // The order is already paid: a successful webhook for it is a
-                    // duplicate/replay regardless of key. Record the delivery as
-                    // SUCCEEDED (traceable) but never re-apply state.
-                    $transaction->update(['status' => PaymentTransactionStatus::SUCCEEDED->value]);
+                    // The order is already paid: a webhook for it is a
+                    // duplicate/replay regardless of key. Record the delivery for
+                    // traceability but never re-apply state. Verify the amount so
+                    // the audit trail reflects a mismatch instead of a bogus
+                    // SUCCEEDED for the wrong amount.
+                    if ($amountCents === (int) $lockedOrder->total_cents) {
+                        $transaction->update(['status' => PaymentTransactionStatus::SUCCEEDED->value]);
+                    } else {
+                        $this->reject($transaction, $rawPayload, 'amount_mismatch');
+                    }
 
                     return PaymentWebhookResult::ALREADY_HANDLED;
                 }

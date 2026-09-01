@@ -212,6 +212,37 @@ class PaymentIdempotencyTest extends TestCase
         );
     }
 
+    public function test_webhook_for_already_paid_order_with_wrong_amount_is_recorded_as_rejected(): void
+    {
+        [$order, $inventory] = $this->makeCheckoutOrder();
+
+        $first = $this->webhook()->handle($order, 'evt-1', 10000, 'prov-ref-1');
+        $this->assertSame(PaymentWebhookResult::PROCESSED, $first);
+
+        $second = $this->webhook()->handle($order, 'evt-4', 1000, 'prov-ref-4');
+        $this->assertSame(PaymentWebhookResult::ALREADY_HANDLED, $second);
+
+        $this->assertSame(OrderStatus::PAID, $order->fresh()->status);
+        $this->assertDatabaseHas('payments', [
+            'order_id' => $order->id,
+            'status' => PaymentStatus::PAID->value,
+        ]);
+        $paymentId = Payment::where('order_id', $order->id)->first()->id;
+        $mismatched = PaymentTransaction::query()
+            ->where('payment_id', $paymentId)
+            ->where('idempotency_key', 'evt-4')
+            ->first();
+        $this->assertNotNull($mismatched, 'A late wrong-amount webhook must still be recorded.');
+        $this->assertSame(PaymentTransactionStatus::REJECTED, $mismatched->status);
+        $this->assertSame('amount_mismatch', $mismatched->raw_payload['rejection_reason'] ?? null);
+        $this->assertSame(9, $inventory->fresh()->physical_stock, 'A late wrong-amount webhook must not double-apply.');
+        $this->assertSame(0, $inventory->fresh()->reserved_stock);
+        $this->assertSame(
+            1,
+            DB::table('stock_movements')->where('type', InventoryMovementType::SALE->value)->count(),
+        );
+    }
+
     public function test_provider_failure_webhook_is_recorded_without_state_changes(): void
     {
         [$order, $inventory] = $this->makeCheckoutOrder();

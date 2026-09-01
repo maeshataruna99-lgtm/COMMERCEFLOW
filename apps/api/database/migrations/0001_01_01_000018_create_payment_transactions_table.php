@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('payment_transactions', function (Blueprint $table) {
             $table->id();
             $table->foreignId('payment_id')->constrained()->cascadeOnDelete();
-            $table->text('idempotency_key')->unique();
+            $table->text('idempotency_key')->unique('payment_transactions_idempotency_key_unique');
             $table->string('provider_reference')->nullable();
             $table->enum('status', [
                 'PENDING',
