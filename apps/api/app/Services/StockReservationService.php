@@ -76,19 +76,26 @@ final class StockReservationService
         });
     }
 
-    public function consume(Order $order): void
+    /**
+     * Consume all ACTIVE reservations as SALE movements. Returns the number of
+     * reservations actually transitioned, so a caller can distinguish a
+     * successful consumption from a 0-ACTIVE-rows abort (reservations already
+     * EXPIRED/RELEASED/CONSUMED — e.g. an in-flight expiry beat the payment),
+     * which must never be reported as success.
+     */
+    public function consume(Order $order): int
     {
-        $this->transitionActiveReservations($order, ReservationState::CONSUMED, InventoryMovementType::SALE);
+        return $this->transitionActiveReservations($order, ReservationState::CONSUMED, InventoryMovementType::SALE);
     }
 
-    public function release(Order $order): void
+    public function release(Order $order): int
     {
-        $this->transitionActiveReservations($order, ReservationState::RELEASED, InventoryMovementType::RELEASE);
+        return $this->transitionActiveReservations($order, ReservationState::RELEASED, InventoryMovementType::RELEASE);
     }
 
-    public function expire(Order $order): void
+    public function expire(Order $order): int
     {
-        $this->transitionActiveReservations($order, ReservationState::EXPIRED, InventoryMovementType::RELEASE);
+        return $this->transitionActiveReservations($order, ReservationState::EXPIRED, InventoryMovementType::RELEASE);
     }
 
     public function releaseReservation(StockReservation $reservation): void
@@ -159,9 +166,11 @@ final class StockReservationService
         Order $order,
         ReservationState $targetState,
         InventoryMovementType $movementType,
-    ): void {
-        $this->retryOnSerialization(function () use ($order, $targetState, $movementType) {
-            DB::transaction(function () use ($order, $targetState, $movementType) {
+    ): int {
+        $transitioned = 0;
+
+        $this->retryOnSerialization(function () use ($order, $targetState, $movementType, &$transitioned) {
+            DB::transaction(function () use ($order, $targetState, $movementType, &$transitioned) {
                 $reservations = $order->stockReservations()
                     ->where('state', ReservationState::ACTIVE->value)
                     ->get();
@@ -184,6 +193,8 @@ final class StockReservationService
                     ->where('state', ReservationState::ACTIVE->value)
                     ->lockForUpdate()
                     ->get();
+
+                $transitioned = $lockedReservations->count();
 
                 foreach ($lockedReservations as $reservation) {
                     $locked = $lockedInventories->get($reservation->inventory_id);
@@ -218,6 +229,8 @@ final class StockReservationService
                 }
             });
         });
+
+        return $transitioned;
     }
 
     /**

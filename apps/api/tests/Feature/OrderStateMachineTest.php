@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\CartStatus;
 use App\Enums\InventoryMovementType;
 use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\ReservationState;
 use App\Exceptions\IllegalOrderTransitionException;
 use App\Exceptions\InsufficientStockException;
@@ -290,6 +291,12 @@ class OrderStateMachineTest extends TestCase
             'before_reserved' => 0,
             'after_reserved' => 2,
             'order_id' => $order->id,
+        ]);
+
+        $this->assertDatabaseHas('payments', [
+            'order_id' => $order->id,
+            'amount_cents' => 2000,
+            'status' => PaymentStatus::PENDING->value,
         ]);
     }
 

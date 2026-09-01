@@ -4,11 +4,13 @@ namespace App\Services;
 
 use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Inventory;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Payment;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -86,6 +88,12 @@ final class CheckoutService
             }
 
             $lockedCart->update(['status' => CartStatus::CHECKED_OUT->value]);
+
+            Payment::create([
+                'order_id' => $order->getKey(),
+                'amount_cents' => (int) $order->fresh()->total_cents,
+                'status' => PaymentStatus::PENDING->value,
+            ]);
 
             return $order->fresh();
         });
