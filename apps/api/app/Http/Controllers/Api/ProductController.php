@@ -6,9 +6,17 @@ use App\Enums\ProductStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use Illuminate\Http\JsonResponse;
+use OpenApi\Attributes as OA;
 
 class ProductController extends Controller
 {
+    #[OA\Get(
+        path: '/api/v1/products',
+        summary: 'List active products',
+        tags: ['Products'],
+    )]
+    #[OA\Parameter(name: 'page', in: 'query', description: 'Page number', schema: new OA\Schema(type: 'integer'))]
+    #[OA\Response(response: 200, description: 'Paginated product list')]
     public function index(): JsonResponse
     {
         $products = Product::query()
@@ -31,6 +39,14 @@ class ProductController extends Controller
         ]);
     }
 
+    #[OA\Get(
+        path: '/api/v1/products/{product}',
+        summary: 'Get a single active product',
+        tags: ['Products'],
+    )]
+    #[OA\Parameter(name: 'product', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))]
+    #[OA\Response(response: 200, description: 'Product detail')]
+    #[OA\Response(response: 404, description: 'Product not found')]
     public function show(Product $product): JsonResponse
     {
         if ($product->status !== ProductStatus::ACTIVE) {

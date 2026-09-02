@@ -9,9 +9,17 @@ use App\Models\CartItem;
 use App\Models\Product;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use OpenApi\Attributes as OA;
 
 class CartController extends Controller
 {
+    #[OA\Get(
+        path: '/api/v1/cart',
+        summary: 'Get the authenticated user\'s cart',
+        tags: ['Cart'],
+        security: [['sanctum' => []]],
+    )]
+    #[OA\Response(response: 200, description: 'Cart with items and total')]
     public function show(Request $request): JsonResponse
     {
         $cart = $this->cartFor($request->user()->id);
@@ -37,6 +45,21 @@ class CartController extends Controller
         ]);
     }
 
+    #[OA\Post(
+        path: '/api/v1/cart/items',
+        summary: 'Add a product to the cart',
+        tags: ['Cart'],
+        security: [['sanctum' => []]],
+    )]
+    #[OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(properties: [
+            new OA\Property(property: 'product_id', type: 'integer', example: 1),
+            new OA\Property(property: 'quantity', type: 'integer', example: 2),
+        ]),
+    )]
+    #[OA\Response(response: 200, description: 'Cart after adding the item')]
+    #[OA\Response(response: 409, description: 'Insufficient stock or inactive cart')]
     public function addItem(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -80,6 +103,15 @@ class CartController extends Controller
         return $this->show($request);
     }
 
+    #[OA\Delete(
+        path: '/api/v1/cart/items/{cartItem}',
+        summary: 'Remove an item from the cart',
+        tags: ['Cart'],
+        security: [['sanctum' => []]],
+    )]
+    #[OA\Parameter(name: 'cartItem', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))]
+    #[OA\Response(response: 200, description: 'Cart after removing the item')]
+    #[OA\Response(response: 404, description: 'Cart item not found')]
     public function removeItem(Request $request, CartItem $cartItem): JsonResponse
     {
         $cart = $this->cartFor($request->user()->id);
