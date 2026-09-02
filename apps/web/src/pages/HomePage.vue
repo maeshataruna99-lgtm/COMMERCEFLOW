@@ -1,16 +1,34 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import api from '@/services/api'
 
-const featured = [
-  { id: 1, name: 'Wireless Headphones', price: 129900, emoji: '🎧' },
-  { id: 2, name: 'Smart Watch', price: 249900, emoji: '⌚' },
-  { id: 3, name: 'Mechanical Keyboard', price: 89900, emoji: '⌨️' },
-  { id: 4, name: '4K Monitor', price: 349900, emoji: '🖥️' },
-]
+interface Product {
+  id: number
+  name: string
+  price_cents: number
+  available: number
+}
+
+const featured = ref<Product[]>([])
+const loading = ref(true)
+
+async function load() {
+  try {
+    const { data } = await api.get('/products')
+    featured.value = data.data.products.data.slice(0, 4)
+  } catch {
+    featured.value = []
+  } finally {
+    loading.value = false
+  }
+}
 
 function formatPrice(cents: number): string {
   return `Rp ${(cents / 100).toLocaleString('id-ID')}`
 }
+
+onMounted(load)
 </script>
 
 <template>
@@ -39,18 +57,18 @@ function formatPrice(cents: number): string {
         </RouterLink>
       </div>
 
-      <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      <p v-if="loading" class="text-slate-500">Memuat produk...</p>
+
+      <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         <RouterLink
           v-for="p in featured"
           :key="p.id"
           :to="`/products/${p.id}`"
           class="group rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
         >
-          <div class="flex h-28 items-center justify-center rounded-lg bg-brand-50 text-5xl">
-            {{ p.emoji }}
-          </div>
+          <div class="flex h-28 items-center justify-center rounded-lg bg-brand-50 text-5xl">📦</div>
           <p class="mt-3 line-clamp-1 text-sm font-medium text-slate-800">{{ p.name }}</p>
-          <p class="mt-1 text-sm font-semibold text-brand-600">{{ formatPrice(p.price) }}</p>
+          <p class="mt-1 text-sm font-semibold text-brand-600">{{ formatPrice(p.price_cents) }}</p>
         </RouterLink>
       </div>
     </section>

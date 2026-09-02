@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { RouterLink, RouterView } from 'vue-router'
+import { onMounted, ref } from 'vue'
+import { RouterLink, RouterView, useRouter } from 'vue-router'
 import { useMenuStore } from '@/stores/menu.store'
 import { useCartStore } from '@/stores/cart.store'
+import { useAuthStore } from '@/stores/auth.store'
 
+const router = useRouter()
 const menuStore = useMenuStore()
 const cartStore = useCartStore()
+const authStore = useAuthStore()
 const mobileOpen = ref(false)
+
+onMounted(() => {
+  menuStore.loadFromApi()
+})
+
+async function handleLogout() {
+  await authStore.logout()
+  router.push('/login')
+}
 </script>
 
 <template>
@@ -84,11 +96,23 @@ const mobileOpen = ref(false)
             </span>
           </RouterLink>
 
+          <template v-if="authStore.isAuthenticated()">
+            <span class="hidden text-sm font-medium text-slate-600 sm:block">
+              {{ authStore.user?.name }}
+            </span>
+            <button
+              class="rounded-lg px-3 py-2 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100"
+              @click="handleLogout"
+            >
+              Keluar
+            </button>
+          </template>
           <RouterLink
-            to="/dashboard"
+            v-else
+            to="/login"
             class="rounded-lg px-3 py-2 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50"
           >
-            Dashboard
+            Masuk
           </RouterLink>
         </div>
       </header>
