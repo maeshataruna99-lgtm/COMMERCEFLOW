@@ -31,3 +31,7 @@ auth.json
 
 # IDE
 .idea/
+
+# Root JS
+node_modules/
+concurrently.log
